@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import AsyncGenerator, Dict, Any, Optional, Callable
+from typing import AsyncGenerator, Dict, Any, Optional, Callable, List
 import uuid
 
 import websockets
@@ -24,34 +24,38 @@ class VertexLiveAPIError(Exception):
 
 class VertexLiveClient:
     """Client for Google Vertex AI Live API bidirectional streaming."""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  project_id: Optional[str] = None,
                  region: str = "us-central1",
-                 model: str = "gemini-2.0-flash-exp",
-                 auth_manager: Optional[VertexAuthManager] = None):
+                 model: str = "gemini-2.5-flash-native-audio-preview-09-2025",
+                 auth_manager: Optional[VertexAuthManager] = None,
+                 tools: Optional[List[Dict[str, Any]]] = None):
         """Initialize Vertex AI Live API client.
-        
+
         Args:
             project_id: Google Cloud project ID
             region: Google Cloud region
             model: Gemini model to use for Live API
             auth_manager: Authentication manager instance
+            tools: List of tool declarations for function calling
         """
         self.auth_manager = auth_manager or VertexAuthManager(project_id)
         self.project_id = self.auth_manager.get_project_id()
         self.region = region
         self.model = model
+        self.tools = tools or []
         self.audio_manager = AudioStreamManager()
-        
+
         # WebSocket connection
         self._websocket: Optional[websockets.WebSocketServerProtocol] = None
         self._session_id: Optional[str] = None
         self._is_connected = False
-        
+
         # Callbacks
         self._on_audio_response: Optional[Callable[[bytes], None]] = None
         self._on_text_response: Optional[Callable[[str], None]] = None
+        self._on_tool_call: Optional[Callable[[List[Dict[str, Any]]], None]] = None
         self._on_error: Optional[Callable[[Exception], None]] = None
         
     async def connect(self) -> None:
@@ -108,7 +112,7 @@ class VertexLiveClient:
         """Send initial configuration to the Live API."""
         # Setup with AUDIO response configuration (camelCase fields required!)
         config = {
-            "model": "models/gemini-2.0-flash-exp",
+            "model": "models/gemini-2.5-flash-native-audio-preview-09-2025",
             "generationConfig": {
                 "responseModalities": "audio",  # Must be camelCase!
                 "speechConfig": {
@@ -120,6 +124,11 @@ class VertexLiveClient:
                 }
             }
         }
+
+        # Add tools if provided
+        if self.tools:
+            config["tools"] = self.tools
+            logger.info(f"Registered {len(self.tools)} tools with Gemini Live API")
 
         message = {
             "setup": config
@@ -198,6 +207,35 @@ class VertexLiveClient:
             logger.error(f"Failed to send text message: {e}")
             raise VertexLiveAPIError(f"Send failed: {e}")
 
+    async def send_tool_response(self, function_responses: List[Dict[str, Any]]) -> None:
+        """Send tool/function call responses back to the Live API.
+
+        Args:
+            function_responses: List of function response objects, each containing:
+                - id: The function call ID from the toolCall message
+                - name: The function name
+                - response: The function result (dict or any JSON-serializable value)
+
+        Raises:
+            VertexLiveAPIError: If not connected or send fails
+        """
+        if not self._is_connected or not self._websocket:
+            raise VertexLiveAPIError("Not connected to Live API")
+
+        try:
+            message = {
+                "tool_response": {
+                    "function_responses": function_responses
+                }
+            }
+
+            await self._websocket.send(json.dumps(message))
+            logger.debug(f"Sent tool responses: {len(function_responses)} function(s)")
+
+        except Exception as e:
+            logger.error(f"Failed to send tool response: {e}")
+            raise VertexLiveAPIError(f"Tool response send failed: {e}")
+
     async def listen_for_responses(self) -> None:
         """Listen for responses from the Live API.
 
@@ -227,8 +265,20 @@ class VertexLiveClient:
             data = json.loads(message)
             logger.debug(f"Received message: {list(data.keys())}")
 
+            # Handle toolCall - Gemini requests function execution
+            if "toolCall" in data:
+                tool_call = data["toolCall"]
+                function_calls = tool_call.get("function_calls", [])
+
+                if function_calls:
+                    logger.info(f"Received tool call request: {len(function_calls)} function(s)")
+
+                    # Call tool callback
+                    if self._on_tool_call:
+                        self._on_tool_call(function_calls)
+
             # Handle modelTurn with audio response
-            if "serverContent" in data:
+            elif "serverContent" in data:
                 server_content = data["serverContent"]
 
                 # Check for modelTurn with audio parts
@@ -268,6 +318,12 @@ class VertexLiveClient:
             elif "setupComplete" in data:
                 logger.debug("Setup complete")
 
+            # Handle toolCallCancellation
+            elif "toolCallCancellation" in data:
+                cancellation = data["toolCallCancellation"]
+                cancelled_ids = cancellation.get("ids", [])
+                logger.info(f"Tool calls cancelled: {cancelled_ids}")
+
         except Exception as e:
             logger.error(f"Error handling response: {e}")
             if self._on_error:
@@ -280,18 +336,26 @@ class VertexLiveClient:
             callback: Function to call with audio data
         """
         self._on_audio_response = callback
-        
+
     def set_text_response_callback(self, callback: Callable[[str], None]) -> None:
         """Set callback for text responses.
-        
+
         Args:
             callback: Function to call with text data
         """
         self._on_text_response = callback
-        
+
+    def set_tool_call_callback(self, callback: Callable[[List[Dict[str, Any]]], None]) -> None:
+        """Set callback for tool/function call requests.
+
+        Args:
+            callback: Function to call with list of function call objects
+        """
+        self._on_tool_call = callback
+
     def set_error_callback(self, callback: Callable[[Exception], None]) -> None:
         """Set callback for errors.
-        
+
         Args:
             callback: Function to call with exceptions
         """

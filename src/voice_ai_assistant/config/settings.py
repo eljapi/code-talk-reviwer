@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     google_cloud_region: str = Field(default="us-central1", env="GOOGLE_CLOUD_REGION")
     
     # Vertex AI Configuration
-    vertex_ai_model: str = Field(default="gemini-2.0-flash-exp", env="VERTEX_AI_MODEL")
+    vertex_ai_model: str = Field(default="gemini-2.5-flash-native-audio-preview-09-2025", env="VERTEX_AI_MODEL")
     vertex_ai_region: str = Field(default="us-central1", env="VERTEX_AI_REGION")
     vertex_ai_voice: str = Field(default="Puck", env="VERTEX_AI_VOICE")
     

@@ -1,12 +1,13 @@
 """Orchestrator voice test script.
 
-This script tests the full voice loop using the VoiceOrchestrator:
+This script tests the full voice loop using the VoiceOrchestrator with Gemini function calling:
 1. Uses AudioIOManager for mic capture and playback
-2. Sends audio to Vertex AI via VoiceOrchestrator
-3. Processes responses through Strands Agent
-4. Plays back synthesized voice responses
+2. Sends audio to Gemini 2.0 Live API via VoiceOrchestrator
+3. Gemini handles conversation AND tool calling (Claude Code)
+4. Tools are executed when Gemini requests them
+5. Plays back synthesized voice responses from Gemini
 
-This demonstrates the complete integration versus the simpler e2e_voice_test.py
+This demonstrates native function calling with streaming voice.
 """
 
 import asyncio
@@ -24,7 +25,7 @@ except ImportError as e:
     print("pip install python-dotenv")
     sys.exit(1)
 
-from voice_ai_assistant.orchestration.voice_orchestrator import VoiceOrchestrator, OrchestratorConfig
+from voice_ai_assistant.orchestration import VoiceOrchestrator, OrchestratorConfig
 
 # Configure logging
 logging.basicConfig(
@@ -61,8 +62,7 @@ class OrchestratorVoiceTester:
 
         # Check required env vars
         required_vars = [
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_AI_API_KEY",
             "CLAUDE_API_KEY"
         ]
 
@@ -75,17 +75,24 @@ class OrchestratorVoiceTester:
         # Get audio settings from env or use defaults
         hardware_sample_rate = int(os.getenv("AUDIO_SAMPLE_RATE", "48000"))
 
+        # Get repository base path (parent directory of all projects)
+        repository_base_path = os.getenv("REPOSITORY_BASE_PATH")
+        if repository_base_path:
+            logger.info(f"Using repository base path: {repository_base_path}")
+        else:
+            # Default to current directory if not specified
+            repository_base_path = os.getcwd()
+            logger.info(f"No REPOSITORY_BASE_PATH set, using current directory: {repository_base_path}")
+
         # Create orchestrator config
         config = OrchestratorConfig(
-            project_id=os.getenv("GOOGLE_CLOUD_PROJECT"),
-            region=os.getenv("GOOGLE_CLOUD_REGION", "us-central1"),
-            model=os.getenv("VERTEX_AI_MODEL", "gemini-2.0-flash-exp"),
-            agent_model=os.getenv("STRANDS_MODEL", "claude-sonnet-4-5-20250929"),
+            model=os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash-native-audio-preview-09-2025"),
             hardware_sample_rate=hardware_sample_rate,
             vertex_input_rate=16000,
             vertex_output_rate=24000,
             input_device=self.input_device,
-            output_device=self.output_device
+            output_device=self.output_device,
+            repository_base_path=repository_base_path
         )
 
         # Create and start orchestrator
@@ -127,14 +134,18 @@ class OrchestratorVoiceTester:
         print(f"Input Device: {self.input_device if self.input_device is not None else 'Default'}")
         print(f"Output Device: {self.output_device if self.output_device is not None else 'Default'}")
         print(f"Sample Rate: {self.orchestrator.config.hardware_sample_rate} Hz")
+        print(f"Repository Base: {self.orchestrator.config.repository_base_path}")
+        print("="*60)
         print("\nℹ️  The orchestrator will:")
         print("  1. Capture audio from your microphone (resampled 48kHz → 16kHz)")
-        print("  2. Send to Vertex AI Live API for transcription")
-        print("  3. Process transcribed text through Strands Agent")
-        print("  4. Synthesize agent response to voice via Vertex AI")
-        print("  5. Play back response (resampled 24kHz → 48kHz)")
+        print("  2. Send to Gemini 2.0 Live API for transcription & conversation")
+        print("  3. Gemini invokes Claude Code tool when needed (e.g., 'read this file')")
+        print("  4. Tool results are sent back to Gemini")
+        print("  5. Gemini synthesizes voice response with tool results")
+        print("  6. Play back response (resampled 24kHz → 48kHz)")
         print("\n▶️  Starting... (Press Ctrl+C to stop)")
-        print("🎤 Speak into your microphone.\n")
+        print("🎤 Speak into your microphone.")
+        print("💡 Try: 'What files are in this project?' or 'Read the main.py file'\n")
 
         try:
             # Start conversation session with audio capture enabled

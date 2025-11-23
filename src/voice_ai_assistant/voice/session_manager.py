@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Dict, Optional, Callable, Any
+from typing import Dict, Optional, Callable, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import uuid
@@ -47,41 +47,45 @@ class SessionState:
 
 class VoiceSessionManager:
     """Manages multiple voice sessions with automatic reconnection."""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  project_id: Optional[str] = None,
                  region: str = "us-central1",
-                 model: str = "gemini-2.0-flash-exp",
+                 model: str = "gemini-2.5-flash-native-audio-preview-09-2025",
                  session_timeout_minutes: int = 30,
-                 max_reconnect_attempts: int = 3):
+                 max_reconnect_attempts: int = 3,
+                 tools: Optional[List[Dict[str, Any]]] = None):
         """Initialize session manager.
-        
+
         Args:
             project_id: Google Cloud project ID
             region: Google Cloud region
             model: Gemini model for Live API
             session_timeout_minutes: Session timeout in minutes
             max_reconnect_attempts: Maximum reconnection attempts
+            tools: List of tool declarations for function calling
         """
         self.auth_manager = VertexAuthManager(project_id)
         self.region = region
         self.model = model
         self.session_timeout_minutes = session_timeout_minutes
         self.max_reconnect_attempts = max_reconnect_attempts
-        
+        self.tools = tools or []
+
         # Active sessions
         self._sessions: Dict[str, VertexLiveClient] = {}
         self._session_states: Dict[str, SessionState] = {}
-        
+
         # Background tasks
         self._cleanup_task: Optional[asyncio.Task] = None
         self._is_running = False
-        
+
         # Event callbacks
         self._on_session_created: Optional[Callable[[str], None]] = None
         self._on_session_ended: Optional[Callable[[str], None]] = None
         self._on_audio_response: Optional[Callable[[str, bytes], None]] = None
         self._on_text_response: Optional[Callable[[str, str], None]] = None
+        self._on_tool_call: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None
         self._on_error: Optional[Callable[[str, Exception], None]] = None
         
     async def start(self) -> None:
@@ -135,15 +139,19 @@ class VoiceSessionManager:
                 project_id=self.auth_manager.project_id,
                 region=self.region,
                 model=self.model,
-                auth_manager=self.auth_manager
+                auth_manager=self.auth_manager,
+                tools=self.tools
             )
-            
+
             # Set up callbacks
             client.set_audio_response_callback(
                 lambda audio_data: self._handle_audio_response(session_id, audio_data)
             )
             client.set_text_response_callback(
                 lambda text: self._handle_text_response(session_id, text)
+            )
+            client.set_tool_call_callback(
+                lambda function_calls: self._handle_tool_call(session_id, function_calls)
             )
             client.set_error_callback(
                 lambda error: self._handle_error(session_id, error)
@@ -235,17 +243,17 @@ class VoiceSessionManager:
             
     async def send_text_message(self, session_id: str, text: str) -> None:
         """Send text message to a session.
-        
+
         Args:
             session_id: Target session
             text: Text message
-            
+
         Raises:
             VertexLiveAPIError: If session not found or send fails
         """
         client = self._get_session_client(session_id)
         state = self._session_states[session_id]
-        
+
         try:
             await client.send_text_message(text)
             state.update_activity()
@@ -253,7 +261,28 @@ class VoiceSessionManager:
         except Exception as e:
             logger.error(f"Failed to send text message to session {session_id}: {e}")
             await self._handle_connection_error(session_id, e)
-            
+
+    async def send_tool_response(self, session_id: str, function_responses: List[Dict[str, Any]]) -> None:
+        """Send tool/function responses back to a session.
+
+        Args:
+            session_id: Target session
+            function_responses: List of function response objects
+
+        Raises:
+            VertexLiveAPIError: If session not found or send fails
+        """
+        client = self._get_session_client(session_id)
+        state = self._session_states[session_id]
+
+        try:
+            await client.send_tool_response(function_responses)
+            state.update_activity()
+
+        except Exception as e:
+            logger.error(f"Failed to send tool response to session {session_id}: {e}")
+            await self._handle_connection_error(session_id, e)
+
     async def stream_audio_file(self, session_id: str, file_path: str) -> None:
         """Stream audio file to a session.
         
@@ -393,7 +422,27 @@ class VoiceSessionManager:
             else:
                 # Call sync callback
                 self._on_text_response(session_id, text)
-            
+
+    def _handle_tool_call(self, session_id: str, function_calls: List[Dict[str, Any]]) -> None:
+        """Handle tool/function call request from session.
+
+        Args:
+            session_id: Session ID
+            function_calls: List of function call objects from Gemini
+        """
+        if session_id in self._session_states:
+            state = self._session_states[session_id]
+            state.update_activity()
+
+        if self._on_tool_call:
+            # Check if callback is async
+            if asyncio.iscoroutinefunction(self._on_tool_call):
+                # Schedule async callback
+                asyncio.create_task(self._on_tool_call(session_id, function_calls))
+            else:
+                # Call sync callback
+                self._on_tool_call(session_id, function_calls)
+
     def _handle_error(self, session_id: str, error: Exception) -> None:
         """Handle error from session.
         
@@ -448,7 +497,11 @@ class VoiceSessionManager:
     def set_text_response_callback(self, callback: Callable[[str, str], None]) -> None:
         """Set callback for text response events."""
         self._on_text_response = callback
-        
+
+    def set_tool_call_callback(self, callback: Callable[[str, List[Dict[str, Any]]], None]) -> None:
+        """Set callback for tool/function call request events."""
+        self._on_tool_call = callback
+
     def set_error_callback(self, callback: Callable[[str, Exception], None]) -> None:
         """Set callback for error events."""
         self._on_error = callback

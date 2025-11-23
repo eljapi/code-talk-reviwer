@@ -40,7 +40,7 @@ def test_vertex_ai_rest_api():
         
         # Test REST API endpoint (equivalent to curl)
         region = "us-central1"
-        model = "gemini-2.0-flash-exp"
+        model = "gemini-2.5-flash-native-audio-preview-09-2025"
         
         url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/google/models/{model}:generateContent"
         
@@ -117,7 +117,7 @@ def test_vertex_ai_streaming_endpoint():
         
         # Test streaming endpoint availability
         region = "us-central1"
-        model = "gemini-2.0-flash-exp"
+        model = "gemini-2.5-flash-native-audio-preview-09-2025"
         
         url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/google/models/{model}:streamGenerateContent"
         

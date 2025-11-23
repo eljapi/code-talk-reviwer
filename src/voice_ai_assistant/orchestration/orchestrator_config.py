@@ -11,7 +11,7 @@ class OrchestratorConfig:
     # Vertex AI settings
     project_id: Optional[str] = None
     region: str = "us-central1"
-    model: str = "gemini-2.0-flash-exp"
+    model: str = "gemini-2.5-flash-native-audio-preview-09-2025"  # Latest Live API model with improved function calling
 
     # Session settings
     session_timeout_minutes: int = 30
@@ -35,3 +35,6 @@ class OrchestratorConfig:
     vertex_output_rate: int = 24000    # Vertex AI output rate
     input_device: Optional[int] = None  # Sounddevice input device index
     output_device: Optional[int] = None # Sounddevice output device index
+
+    # Repository settings
+    repository_base_path: Optional[str] = None  # Base path for all projects (e.g., C:\Users\japi\Documents\git\)

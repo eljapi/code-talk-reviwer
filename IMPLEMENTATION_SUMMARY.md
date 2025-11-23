@@ -121,7 +121,7 @@ We have successfully implemented the complete voice conversation orchestration s
 - **Endpoint**: WebSocket connection to Gemini Live API
 - **Authentication**: Service account credentials configured
 - **Protocol**: Bidirectional streaming with PCM audio format
-- **Models**: `gemini-2.0-flash-exp` configured for live interaction
+- **Models**: `gemini-2.5-flash-native-audio-preview-09-2025` configured for live interaction
 
 #### **2. Strands Agent Integration** (Architecture ready)
 - **Framework**: Strands Agents SDK integration points prepared

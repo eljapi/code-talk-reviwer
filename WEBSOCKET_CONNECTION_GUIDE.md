@@ -143,7 +143,7 @@ session_id = await orchestrator.start_conversation("user-123")
 1. **Check API key**: Make sure it's valid and has correct permissions
 2. **Check region**: Gemini Live API may not be available in all regions
 3. **Check quotas**: You might have hit rate limits
-4. **Check model**: Make sure `gemini-2.0-flash-exp` is available
+4. **Check model**: Make sure `gemini-2.5-flash-native-audio-preview-09-2025` is available
 
 ### If Audio Doesn't Work:
 1. **Check audio format**: Must be PCM, 16kHz, 16-bit, mono

@@ -32,7 +32,7 @@ El archivo `.env` contiene:
 GOOGLE_APPLICATION_CREDENTIALS=voice-ai-service-account-key.json
 GOOGLE_CLOUD_PROJECT=powerful-outlet-477200-f0
 VERTEX_AI_REGION=us-central1
-VERTEX_AI_MODEL=gemini-2.0-flash-exp
+VERTEX_AI_MODEL=gemini-2.5-flash-native-audio-preview-09-2025
 VERTEX_AI_VOICE=Puck
 MAX_CONCURRENT_SESSIONS=10
 SESSION_TIMEOUT_MINUTES=30

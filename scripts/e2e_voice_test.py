@@ -85,7 +85,7 @@ class VoiceLoopTester:
         config = OrchestratorConfig(
             project_id=os.getenv("GOOGLE_CLOUD_PROJECT"),
             region=os.getenv("GOOGLE_CLOUD_REGION", "us-central1"),
-            model=os.getenv("VERTEX_AI_MODEL", "gemini-2.0-flash-exp"),
+            model=os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash-native-audio-preview-09-2025"),
             agent_model=os.getenv("STRANDS_MODEL", "claude-sonnet-4-5-20250929")
         )
         
