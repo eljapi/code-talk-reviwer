@@ -55,25 +55,36 @@ class StrandsAgent:
         
     async def process_message(self, text: str) -> AsyncGenerator[str, None]:
         """Process a user message and stream the response.
-        
+
         Args:
             text: User input text.
-            
+
         Yields:
             Chunks of the agent's response text.
         """
         if not self.agent:
             raise RuntimeError("Agent not started")
-            
+
         logger.info(f"Processing message: {text}")
-        
+
         try:
-            # Use Strands' async streaming interface
-            # Note: The exact API depends on Strands version, assuming stream_async based on docs
-            async for event in self.agent.stream_async(text):
-                if "data" in event:
-                    yield event["data"]
-                    
+            # Use Strands Agent run method with streaming
+            # The Agent.run method returns a response object
+            response = await self.agent.run(text)
+
+            # Check if response has streaming capability
+            if hasattr(response, 'stream'):
+                # Stream the response chunks
+                async for chunk in response.stream():
+                    if hasattr(chunk, 'text') and chunk.text:
+                        yield chunk.text
+            elif hasattr(response, 'text'):
+                # If no streaming, yield the full text
+                yield response.text
+            else:
+                # Fallback: convert to string
+                yield str(response)
+
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"Error processing message: {e}", exc_info=True)
             yield f"I encountered an error: {str(e)}"

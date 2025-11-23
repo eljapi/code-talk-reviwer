@@ -306,45 +306,59 @@ class StreamingPipelineManager:
             
     async def _process_chunk(self, session_id: str, audio_data: bytes) -> None:
         """Process individual audio chunk.
-        
-        This is a placeholder for actual audio processing logic.
-        In the real implementation, this would:
-        1. Apply audio preprocessing
-        2. Forward to agent processing
-        3. Handle streaming responses
-        
+
+        Currently performs basic validation and logging.
+        Future enhancements could include:
+        - Audio preprocessing/filtering
+        - Voice activity detection
+        - Noise reduction
+
         Args:
             session_id: Session identifier
             audio_data: Audio chunk to process
         """
-        # Simulate processing delay
-        await asyncio.sleep(0.01)
-        
-        # TODO: Integrate with actual audio processing pipeline
-        # This would include:
-        # - Audio preprocessing/filtering
-        # - Integration with Strands Agent
-        # - Response streaming coordination
-        
-        logger.debug(f"Processed audio chunk for {session_id}: {len(audio_data)} bytes")
+        # Basic validation
+        if not audio_data:
+            logger.warning(f"Empty audio chunk received for session {session_id}")
+            return
+
+        # Log chunk size for monitoring
+        chunk_size = len(audio_data)
+        logger.debug(f"Processing audio chunk for {session_id}: {chunk_size} bytes")
+
+        # Future: Add audio preprocessing here
+        # - Voice activity detection
+        # - Noise reduction
+        # - Echo cancellation
         
     async def _process_response_audio(self, session_id: str, audio_data: bytes) -> None:
         """Process response audio for output.
-        
+
+        Currently performs basic validation and passes through to output.
+        The actual audio playback is handled by AudioIOManager in the orchestrator.
+
+        Future enhancements could include:
+        - Audio post-processing
+        - Volume normalization
+        - Quality optimization
+
         Args:
             session_id: Session identifier
-            audio_data: Response audio data
+            audio_data: Response audio data from Vertex AI
         """
-        # Simulate response processing
-        await asyncio.sleep(0.005)
-        
-        # TODO: Integrate with actual response processing
-        # This would include:
-        # - Audio post-processing
-        # - Output streaming coordination
-        # - Quality optimization
-        
-        logger.debug(f"Processed response audio for {session_id}: {len(audio_data)} bytes")
+        # Basic validation
+        if not audio_data:
+            logger.warning(f"Empty audio response received for session {session_id}")
+            return
+
+        # Log response size for monitoring
+        response_size = len(audio_data)
+        logger.debug(f"Processing audio response for {session_id}: {response_size} bytes")
+
+        # Future: Add audio post-processing here
+        # - Volume normalization
+        # - Equalization
+        # - Quality enhancement
         
     async def _monitor_performance(self) -> None:
         """Background task to monitor pipeline performance."""

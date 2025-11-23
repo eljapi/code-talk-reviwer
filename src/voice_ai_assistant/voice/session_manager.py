@@ -354,7 +354,7 @@ class VoiceSessionManager:
             
     def _handle_audio_response(self, session_id: str, audio_data: bytes) -> None:
         """Handle audio response from session.
-        
+
         Args:
             session_id: Session ID
             audio_data: Audio response data
@@ -363,13 +363,19 @@ class VoiceSessionManager:
             state = self._session_states[session_id]
             state.total_responses += 1
             state.update_activity()
-            
+
         if self._on_audio_response:
-            self._on_audio_response(session_id, audio_data)
+            # Check if callback is async
+            if asyncio.iscoroutinefunction(self._on_audio_response):
+                # Schedule async callback
+                asyncio.create_task(self._on_audio_response(session_id, audio_data))
+            else:
+                # Call sync callback
+                self._on_audio_response(session_id, audio_data)
             
     def _handle_text_response(self, session_id: str, text: str) -> None:
         """Handle text response from session.
-        
+
         Args:
             session_id: Session ID
             text: Text response
@@ -378,9 +384,15 @@ class VoiceSessionManager:
             state = self._session_states[session_id]
             state.total_responses += 1
             state.update_activity()
-            
+
         if self._on_text_response:
-            self._on_text_response(session_id, text)
+            # Check if callback is async
+            if asyncio.iscoroutinefunction(self._on_text_response):
+                # Schedule async callback
+                asyncio.create_task(self._on_text_response(session_id, text))
+            else:
+                # Call sync callback
+                self._on_text_response(session_id, text)
             
     def _handle_error(self, session_id: str, error: Exception) -> None:
         """Handle error from session.

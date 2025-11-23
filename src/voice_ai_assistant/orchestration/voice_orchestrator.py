@@ -12,6 +12,7 @@ import uuid
 
 from ..voice.session_manager import VoiceSessionManager, SessionState
 from ..voice.vertex_client import VertexLiveClient
+from ..voice.audio_io_manager import AudioIOManager
 from ..agent.strands_agent import StrandsAgent
 from .flow_manager import ConversationFlowManager
 from .pipeline import StreamingPipelineManager
@@ -22,27 +23,34 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OrchestratorConfig:
     """Configuration for voice orchestrator."""
-    
+
     # Vertex AI settings
     project_id: Optional[str] = None
     region: str = "us-central1"
     model: str = "gemini-2.0-flash-exp"
-    
+
     # Session settings
     session_timeout_minutes: int = 30
     max_concurrent_sessions: int = 10
-    
+
     # Performance settings
     max_response_latency_ms: int = 300
     audio_chunk_size: int = 1024
-    
+
     # Agent settings
     agent_model: str = "claude-sonnet-4-5-20250929"
     enable_code_tools: bool = True
-    
+
     # Safety settings
     max_conversation_turns: int = 50
     enable_interruption: bool = True
+
+    # Audio I/O settings
+    hardware_sample_rate: int = 48000  # Hardware interface sample rate (e.g., Scarlett)
+    vertex_input_rate: int = 16000     # Vertex AI expected input rate
+    vertex_output_rate: int = 24000    # Vertex AI output rate
+    input_device: Optional[int] = None  # Sounddevice input device index
+    output_device: Optional[int] = None # Sounddevice output device index
 
 
 class VoiceOrchestrator:
@@ -79,7 +87,19 @@ class VoiceOrchestrator:
         self.pipeline_manager = StreamingPipelineManager(
             max_latency_ms=self.config.max_response_latency_ms
         )
-        
+
+        # Audio I/O Manager
+        self.audio_io_manager = AudioIOManager(
+            hardware_sample_rate=self.config.hardware_sample_rate,
+            vertex_input_rate=self.config.vertex_input_rate,
+            vertex_output_rate=self.config.vertex_output_rate,
+            channels=1,
+            block_size=self.config.audio_chunk_size,
+            dtype='int16',
+            input_device=self.config.input_device,
+            output_device=self.config.output_device
+        )
+
         # Active orchestration sessions
         self._active_sessions: Dict[str, 'OrchestrationSession'] = {}
         self._is_running = False
@@ -116,43 +136,51 @@ class VoiceOrchestrator:
         """Stop the voice orchestrator."""
         if not self._is_running:
             return
-            
+
         logger.info("Stopping voice orchestrator")
-        
+
+        # Stop audio I/O
+        self.stop_audio_capture()
+        self.stop_audio_playback()
+
         # End all active sessions
         for session_id in list(self._active_sessions.keys()):
             await self.end_conversation(session_id)
-            
+
+        # Shutdown audio I/O manager
+        self.audio_io_manager.shutdown()
+
         # Stop underlying components
         await self.session_manager.stop()
         await self.flow_manager.stop()
         await self.pipeline_manager.stop()
-        
+
         self._is_running = False
         logger.info("Voice orchestrator stopped")
         
-    async def start_conversation(self, user_id: Optional[str] = None) -> str:
+    async def start_conversation(self, user_id: Optional[str] = None, enable_audio_capture: bool = True) -> str:
         """Start a new voice conversation.
-        
+
         Args:
             user_id: Optional user identifier
-            
+            enable_audio_capture: Whether to start microphone capture automatically
+
         Returns:
             Session ID for the conversation
-            
+
         Raises:
             RuntimeError: If orchestrator not running or session limit reached
         """
         if not self._is_running:
             raise RuntimeError("Orchestrator not running")
-            
+
         if len(self._active_sessions) >= self.config.max_concurrent_sessions:
             raise RuntimeError("Maximum concurrent sessions reached")
-            
+
         try:
             # Create voice session
             voice_session_id = await self.session_manager.create_session(user_id)
-            
+
             # Create orchestration session
             orchestration_session = OrchestrationSession(
                 session_id=voice_session_id,
@@ -160,27 +188,31 @@ class VoiceOrchestrator:
                 orchestrator=self,
                 agent_model=self.config.agent_model
             )
-            
+
             # Initialize agent
             await orchestration_session.initialize_agent()
-            
+
             # Initialize conversation flow
             await self.flow_manager.initialize_conversation(voice_session_id)
-            
+
             # Initialize streaming pipeline
             await self.pipeline_manager.initialize_session(voice_session_id)
-            
+
             # Store active session
             self._active_sessions[voice_session_id] = orchestration_session
-            
+
+            # Start audio capture if enabled
+            if enable_audio_capture:
+                await self.start_audio_capture(voice_session_id)
+
             logger.info(f"Started conversation session: {voice_session_id}")
-            
+
             # Notify callback
             if self._on_session_started:
                 self._on_session_started(voice_session_id)
-                
+
             return voice_session_id
-            
+
         except Exception as e:
             logger.error(f"Failed to start conversation: {e}")
             raise
@@ -284,7 +316,7 @@ class VoiceOrchestrator:
         
     def list_active_sessions(self) -> Dict[str, Dict[str, Any]]:
         """List all active conversation sessions.
-        
+
         Returns:
             Dictionary of session ID to session state
         """
@@ -292,7 +324,39 @@ class VoiceOrchestrator:
             session_id: self.get_session_state(session_id)
             for session_id in self._active_sessions.keys()
         }
-        
+
+    async def start_audio_capture(self, session_id: str) -> None:
+        """Start capturing audio from microphone for a session.
+
+        Args:
+            session_id: Session to capture audio for
+
+        Raises:
+            ValueError: If session not found
+        """
+        if session_id not in self._active_sessions:
+            raise ValueError(f"Session not found: {session_id}")
+
+        # Create audio callback that sends to Vertex AI
+        async def audio_callback(audio_data: bytes):
+            await self.send_audio_chunk(session_id, audio_data)
+
+        # Start capture with the callback
+        event_loop = asyncio.get_running_loop()
+        self.audio_io_manager.start_capture(audio_callback, event_loop)
+
+        logger.info(f"Started audio capture for session: {session_id}")
+
+    def stop_audio_capture(self) -> None:
+        """Stop capturing audio from microphone."""
+        self.audio_io_manager.stop_capture()
+        logger.info("Stopped audio capture")
+
+    def stop_audio_playback(self) -> None:
+        """Stop audio playback and clear buffer."""
+        self.audio_io_manager.stop_playback()
+        logger.info("Stopped audio playback")
+
     # Internal event handlers
     
     async def _on_voice_session_created(self, session_id: str) -> None:
@@ -309,19 +373,21 @@ class VoiceOrchestrator:
             
     async def _on_audio_response(self, session_id: str, audio_data: bytes) -> None:
         """Handle audio response from Vertex AI.
-        
-        This is where we would integrate with Strands Agent to process
-        the audio and generate intelligent responses.
+
+        Plays back audio through the AudioIOManager with proper resampling.
         """
         if session_id not in self._active_sessions:
             return
-            
+
         try:
             # Process through pipeline manager
             await self.pipeline_manager.process_audio_response(session_id, audio_data)
-            
-            logger.debug(f"Processed audio response for session: {session_id}")
-            
+
+            # Play back audio (with resampling from 24kHz to hardware rate)
+            self.audio_io_manager.play_audio(audio_data)
+
+            logger.debug(f"Processed and played audio response for session: {session_id}")
+
         except Exception as e:
             logger.error(f"Error processing audio response for {session_id}: {e}")
             if self._on_error:
