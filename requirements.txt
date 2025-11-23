@@ -1,0 +1,12 @@
+# Production dependencies
+strands-agents>=1.14.0
+claude-agent-sdk>=0.1.6
+google-cloud-aiplatform>=1.38.0
+google-cloud-speech>=2.21.0
+websockets>=11.0.3
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+requests>=2.31.0
