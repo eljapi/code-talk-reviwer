@@ -10,7 +10,7 @@ def test_settings_default_values():
     settings = Settings()
     
     assert settings.google_cloud_region == "us-central1"
-    assert settings.strands_model == "claude-sonnet-4-5-20250929"
+    assert settings.strands_model == "claude-haiku-4-5-20251001"
     assert settings.strands_max_turns == 10
     assert settings.claude_code_permission_mode == "plan"
     assert settings.claude_code_repository_path == "./"

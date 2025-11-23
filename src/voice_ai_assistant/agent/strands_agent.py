@@ -19,7 +19,7 @@ class StrandsAgent:
     
     def __init__(
         self, 
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-haiku-4-5-20251001",
         repository_path: Optional[str] = None,
         status_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ):

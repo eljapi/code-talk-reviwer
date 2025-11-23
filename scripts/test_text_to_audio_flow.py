@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 async def test_text_to_audio_flow():
     load_dotenv()
-    
+
     # Check for API keys
     if not os.getenv("CLAUDE_API_KEY"):
         logger.error("CLAUDE_API_KEY not found in environment variables.")
@@ -35,13 +35,21 @@ async def test_text_to_audio_flow():
         return
 
     logger.info("Starting Text-to-Audio Flow Test...")
-    
+
+    # Get repository base path from environment or use current directory
+    repository_base_path = os.getenv("REPOSITORY_BASE_PATH")
+    if repository_base_path:
+        logger.info(f"Using repository base path from .env: {repository_base_path}")
+    else:
+        repository_base_path = os.getcwd()
+        logger.info(f"No REPOSITORY_BASE_PATH set, using current directory: {repository_base_path}")
+
     # Configure Orchestrator
     # We use defaults, but ensure we have a valid project_id
     config = OrchestratorConfig(
         project_id=os.getenv("GOOGLE_CLOUD_PROJECT"),
         agent_model="claude-haiku-4-5-20251001", # Use a known valid model for Strands if needed, or default
-        repository_base_path=os.getcwd()
+        repository_base_path=repository_base_path
     )
     
     orchestrator = VoiceOrchestrator(config)

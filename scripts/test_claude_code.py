@@ -12,13 +12,17 @@ import logging
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Load environment variables from .env file
-load_dotenv()
+# Try to load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not installed, will use system env vars
+    pass
 
 from src.voice_ai_assistant.agent.tools import ClaudeCodeTool
 

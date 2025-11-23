@@ -127,7 +127,7 @@ graph TB
 ```python
 # Strands agent with Claude Code tools
 agent = Agent(
-    model="claude-sonnet-4-5-20250929",
+    model="claude-haiku-4-5-20251001",
     tools=[claude_code_read, claude_code_grep, claude_code_bash],
     system_prompt="You are a senior engineer assistant..."
 )
@@ -158,7 +158,7 @@ class AudioState:
 ```python
 @dataclass
 class AgentConfig:
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "claude-haiku-4-5-20251001"
     tools: List[Tool]
     system_prompt: str
     permission_mode: Literal['plan', 'acceptEdits', 'auto']

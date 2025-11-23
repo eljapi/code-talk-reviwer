@@ -22,4 +22,4 @@ def test_import_settings():
     from voice_ai_assistant.config.settings import settings, Settings
     
     assert isinstance(settings, Settings)
-    assert settings.strands_model == "claude-sonnet-4-5-20250929"
+    assert settings.strands_model == "claude-haiku-4-5-20251001"

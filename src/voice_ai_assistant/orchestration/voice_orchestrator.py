@@ -384,38 +384,53 @@ class VoiceOrchestrator:
             # --- NEW WORKFLOW ---
             # Pass text to Strands Agent and buffer chunks for better audio quality
             logger.info(f"Passing text to Strands Agent: {text}")
-            
+
             text_buffer = []
+            min_buffer_size = 150  # Larger minimum for smoother audio
+
             async for chunk in self.strands_agent.process_message(text):
                 if chunk:
                     logger.info(f"Strands Agent response chunk: {chunk}")
                     text_buffer.append(chunk)
-                    
-                    # Buffer text until we have a reasonable amount (sentence or phrase)
-                    # This prevents choppy audio from too-small chunks
+
+                    # Join buffer to check conditions
                     buffered_text = "".join(text_buffer)
-                    if len(buffered_text) > 50 or chunk.endswith(('.', '!', '?', '\n')):
+
+                    # Trigger synthesis when:
+                    # 1. We have a sentence ending (. ! ?)
+                    # 2. We've accumulated enough text (150+ chars for smoother audio)
+                    # 3. Double newline (paragraph break)
+                    has_sentence_end = buffered_text.rstrip().endswith(('.', '!', '?'))
+                    has_paragraph_break = '\n\n' in buffered_text
+                    has_minimum_size = len(buffered_text) >= min_buffer_size
+
+                    should_synthesize = (has_sentence_end or has_paragraph_break) and len(buffered_text) >= 30
+
+                    if should_synthesize or has_minimum_size:
                         # Synthesize speech for the buffered text
+                        logger.debug(f"Synthesizing {len(buffered_text)} chars (sentence_end={has_sentence_end}, min_size={has_minimum_size})")
                         audio_data = await self.tts_manager.synthesize(buffered_text)
-                        
+
                         if audio_data:
                             self.audio_io_manager.play_audio(audio_data)
-                            
-                        # Notify conversation turn callback (agent response)
-                        if self._on_conversation_turn:
-                            self._on_conversation_turn(session_id, "agent", buffered_text)
-                        
+
+                            # Notify conversation turn callback (agent response)
+                            if self._on_conversation_turn:
+                                self._on_conversation_turn(session_id, "agent", buffered_text)
+
                         # Clear buffer
                         text_buffer = []
-            
-            # Synthesize any remaining buffered text
+
+            # Synthesize any remaining buffered text (important for final phrases)
             if text_buffer:
-                buffered_text = "".join(text_buffer)
-                audio_data = await self.tts_manager.synthesize(buffered_text)
-                if audio_data:
-                    self.audio_io_manager.play_audio(audio_data)
-                if self._on_conversation_turn:
-                    self._on_conversation_turn(session_id, "agent", buffered_text)
+                buffered_text = "".join(text_buffer).strip()
+                if buffered_text:  # Only if there's actual text
+                    logger.debug(f"Synthesizing remaining text: {len(buffered_text)} chars")
+                    audio_data = await self.tts_manager.synthesize(buffered_text)
+                    if audio_data:
+                        self.audio_io_manager.play_audio(audio_data)
+                    if self._on_conversation_turn:
+                        self._on_conversation_turn(session_id, "agent", buffered_text)
 
         except Exception as e:
             logger.error(f"Error processing text response for {session_id}: {e}")

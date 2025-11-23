@@ -22,7 +22,7 @@ class OrchestratorConfig:
     audio_chunk_size: int = 1024
 
     # Agent settings
-    agent_model: str = "claude-sonnet-4-5-20250929"
+    agent_model: str = "claude-haiku-4-5-20251001"
     enable_code_tools: bool = True
 
     # Safety settings

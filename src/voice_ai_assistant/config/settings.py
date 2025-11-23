@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # Strands Configuration
     strands_model: str = Field(
-        default="claude-sonnet-4-5-20250929", env="STRANDS_MODEL"
+        default="claude-haiku-4-5-20251001", env="STRANDS_MODEL"
     )
     strands_max_turns: int = Field(default=10, env="STRANDS_MAX_TURNS")
 

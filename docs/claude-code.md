@@ -31,7 +31,7 @@ from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage, TextBl
 async def main() -> None:
     opts = ClaudeAgentOptions(
         cwd="/srv/repos/your-monorepo",       # VPS path
-        model="claude-sonnet-4-5-20250929",   # pin exact model or just "sonnet"
+        model="claude-haiku-4-5-20251001",   # pin exact model or just "sonnet"
         allowed_tools=["Read", "Grep", "Glob", "Bash"],
         permission_mode="acceptEdits",        # 'plan' | 'ask' | 'acceptEdits' | 'auto'
         system_prompt=(
@@ -67,7 +67,7 @@ from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AssistantMessa
 async def voice_session():
     opts = ClaudeAgentOptions(
         cwd="/srv/repos/your-monorepo",
-        model="claude-sonnet-4-5-20250929",
+        model="claude-haiku-4-5-20251001",
         allowed_tools=["Read", "Grep", "Glob", "Bash"],
         permission_mode="acceptEdits",
     )
