@@ -7,50 +7,15 @@ voice-to-voice conversations with intelligent code assistance.
 import asyncio
 import logging
 from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass
-import uuid
 
-from ..voice.session_manager import VoiceSessionManager, SessionState
-from ..voice.vertex_client import VertexLiveClient
+from ..voice.session_manager import VoiceSessionManager
 from ..voice.audio_io_manager import AudioIOManager
-from ..agent.strands_agent import StrandsAgent
+from .orchestrator_config import OrchestratorConfig
+from .orchestration_session import OrchestrationSession
 from .flow_manager import ConversationFlowManager
 from .pipeline import StreamingPipelineManager
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class OrchestratorConfig:
-    """Configuration for voice orchestrator."""
-
-    # Vertex AI settings
-    project_id: Optional[str] = None
-    region: str = "us-central1"
-    model: str = "gemini-2.0-flash-exp"
-
-    # Session settings
-    session_timeout_minutes: int = 30
-    max_concurrent_sessions: int = 10
-
-    # Performance settings
-    max_response_latency_ms: int = 300
-    audio_chunk_size: int = 1024
-
-    # Agent settings
-    agent_model: str = "claude-sonnet-4-5-20250929"
-    enable_code_tools: bool = True
-
-    # Safety settings
-    max_conversation_turns: int = 50
-    enable_interruption: bool = True
-
-    # Audio I/O settings
-    hardware_sample_rate: int = 48000  # Hardware interface sample rate (e.g., Scarlett)
-    vertex_input_rate: int = 16000     # Vertex AI expected input rate
-    vertex_output_rate: int = 24000    # Vertex AI output rate
-    input_device: Optional[int] = None  # Sounddevice input device index
-    output_device: Optional[int] = None # Sounddevice output device index
 
 
 class VoiceOrchestrator:
@@ -457,57 +422,3 @@ class VoiceOrchestrator:
     def set_error_callback(self, callback: Callable[[str, Exception], None]) -> None:
         """Set callback for error events."""
         self._on_error = callback
-
-
-class OrchestrationSession:
-    """Represents an active orchestration session.
-    
-    This class manages the state and lifecycle of a single voice conversation
-    session, coordinating between voice, agent, and streaming components.
-    """
-    
-    def __init__(self, session_id: str, user_id: Optional[str], orchestrator: VoiceOrchestrator, agent_model: str):
-        """Initialize orchestration session.
-        
-        Args:
-            session_id: Unique session identifier
-            user_id: Optional user identifier
-            orchestrator: Parent orchestrator instance
-            agent_model: Model identifier for the agent
-        """
-        self.session_id = session_id
-        self.user_id = user_id
-        self.orchestrator = orchestrator
-        self.agent_model = agent_model
-        self.created_at = asyncio.get_event_loop().time()
-        
-        # Session state
-        self.is_active = True
-        self.conversation_turns = 0
-        self.last_activity = self.created_at
-        
-        # Strands Agent
-        self.agent: Optional[StrandsAgent] = None
-        
-    async def initialize_agent(self) -> None:
-        """Initialize and start the Strands Agent."""
-        self.agent = StrandsAgent(model=self.agent_model)
-        await self.agent.start()
-        
-    async def cleanup(self) -> None:
-        """Clean up session resources."""
-        self.is_active = False
-        
-        # Clean up Strands Agent resources
-        if self.agent:
-            await self.agent.stop()
-        
-        logger.debug(f"Cleaned up orchestration session: {self.session_id}")
-        
-    def update_activity(self) -> None:
-        """Update last activity timestamp."""
-        self.last_activity = asyncio.get_event_loop().time()
-        
-    def get_session_duration(self) -> float:
-        """Get session duration in seconds."""
-        return asyncio.get_event_loop().time() - self.created_at
