@@ -23,16 +23,18 @@ class ClaudeCodeTool:
     a tool method that Strands agents can call.
     """
     
-    def __init__(self, repository_path: Optional[str] = None):
+    def __init__(self, repository_path: Optional[str] = None, status_callback: Optional[Any] = None):
         """Initialize Claude Code tool.
         
         Args:
             repository_path: Path to the repository to operate on.
+            status_callback: Optional async callback for streaming status updates.
         """
         self.repo_manager = RepositoryManager(repository_path)
         self.options = self.repo_manager.get_options()
         self.client: Optional[ClaudeSDKClient] = None
         self._lock = asyncio.Lock()
+        self.status_callback = status_callback
         
     async def start(self) -> None:
         """Start the Claude Code SDK client session."""
@@ -78,12 +80,14 @@ class ClaudeCodeTool:
                 # Send query to Claude Code
                 await self.client.query(task_description)
                 
-                # Process streamed response
+                # Process streamed response (collect but don't stream to callback)
                 async for msg in self.client.receive_response():
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock):
-                                response_text.append(block.text)
+                                text = block.text
+                                response_text.append(text)
+                                # Don't stream individual chunks - let agent summarize
                                 
             result = "".join(response_text)
             return result if result else "Task completed with no output."

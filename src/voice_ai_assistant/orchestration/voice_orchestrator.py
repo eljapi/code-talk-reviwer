@@ -1,9 +1,3 @@
-"""Main voice conversation orchestrator.
-
-Coordinates between Vertex AI Live API and Claude Code for real-time
-voice-to-voice conversations with intelligent code assistance.
-"""
-
 import asyncio
 import logging
 from typing import Optional, Dict, Any, Callable, List
@@ -11,7 +5,8 @@ from typing import Optional, Dict, Any, Callable, List
 from ..voice.session_manager import VoiceSessionManager
 from ..voice.audio_io_manager import AudioIOManager
 from ..voice.gemini_tools import get_all_tool_declarations
-from ..agent.tools import ClaudeCodeTool
+from ..voice.tts_manager import TTSManager
+from ..agent.strands_agent import StrandsAgent
 from .orchestrator_config import OrchestratorConfig
 from .flow_manager import ConversationFlowManager
 from .pipeline import StreamingPipelineManager
@@ -23,9 +18,9 @@ class VoiceOrchestrator:
     """Main orchestrator for voice conversations with AI agent.
 
     This class coordinates the entire voice conversation pipeline:
-    1. Manages Vertex AI Live API sessions with function calling
-    2. Integrates with Claude Code for repository analysis
-    3. Handles real-time streaming between voice and code tools
+    1. Manages Vertex AI Live API sessions (mainly for STT)
+    2. Integrates with Strands Agent for conversation and coding tasks
+    3. Handles real-time streaming between voice and agent
     4. Manages conversation flow and interruptions
     """
 
@@ -37,13 +32,18 @@ class VoiceOrchestrator:
         """
         self.config = config or OrchestratorConfig()
 
-        # Get tool declarations for Gemini
+        # Get tool declarations for Gemini (kept for compatibility, though Strands drives now)
         self.tools = get_all_tool_declarations()
+        
+        # Initialize TTS Manager
+        self.tts_manager = TTSManager(project_id=self.config.project_id)
 
-        # Claude Code Tool (single shared instance)
-        # Use repository_base_path if provided, otherwise current directory
-        self.claude_tool = ClaudeCodeTool(
-            repository_path=self.config.repository_base_path
+        # Initialize Strands Agent
+        # Pass callback for streaming status updates from tools and repository path
+        self.strands_agent = StrandsAgent(
+            model=self.config.agent_model, # Use specific agent model (Claude)
+            repository_path=self.config.repository_base_path,
+            status_callback=self._on_tool_status_update
         )
 
         # Core components
@@ -93,8 +93,8 @@ class VoiceOrchestrator:
 
         logger.info("Starting voice orchestrator")
 
-        # Start Claude Code tool
-        await self.claude_tool.start()
+        # Start Strands Agent
+        await self.strands_agent.start()
 
         # Start underlying components
         await self.session_manager.start()
@@ -104,6 +104,7 @@ class VoiceOrchestrator:
         # Set up session manager callbacks
         self.session_manager.set_session_created_callback(self._on_voice_session_created)
         self.session_manager.set_session_ended_callback(self._on_voice_session_ended)
+        # We might ignore audio response from Gemini if Strands is driving
         self.session_manager.set_audio_response_callback(self._on_audio_response)
         self.session_manager.set_text_response_callback(self._on_text_response)
         self.session_manager.set_tool_call_callback(self._on_tool_call)
@@ -135,8 +136,8 @@ class VoiceOrchestrator:
         await self.flow_manager.stop()
         await self.pipeline_manager.stop()
 
-        # Stop Claude Code tool
-        await self.claude_tool.stop()
+        # Stop Strands Agent
+        await self.strands_agent.stop()
 
         self._is_running = False
         logger.info("Voice orchestrator stopped")
@@ -341,6 +342,8 @@ class VoiceOrchestrator:
         """Handle audio response from Vertex AI.
 
         Plays back audio through the AudioIOManager with proper resampling.
+        NOTE: In the new workflow, we might want to suppress this if Strands is speaking.
+        For now, we will allow it but logging it.
         """
         if session_id not in self._active_sessions:
             return
@@ -350,9 +353,9 @@ class VoiceOrchestrator:
             await self.pipeline_manager.process_audio_response(session_id, audio_data)
 
             # Play back audio (with resampling from 24kHz to hardware rate)
-            self.audio_io_manager.play_audio(audio_data)
+            # self.audio_io_manager.play_audio(audio_data)
 
-            logger.debug(f"Processed and played audio response for session: {session_id}")
+            logger.debug(f"Received audio response from Gemini for session: {session_id} (Suppressed in favor of Strands)")
 
         except Exception as e:
             logger.error(f"Error processing audio response for {session_id}: {e}")
@@ -360,10 +363,10 @@ class VoiceOrchestrator:
                 self._on_error(session_id, e)
                 
     async def _on_text_response(self, session_id: str, text: str) -> None:
-        """Handle text response from Gemini.
+        """Handle text response from Gemini (STT).
 
-        This represents transcribed user speech (for logging/monitoring).
-        Gemini handles the full conversation - we just log it.
+        This represents transcribed user speech.
+        We pass this to Strands Agent to drive the conversation.
         """
         if session_id not in self._active_sessions:
             return
@@ -377,6 +380,42 @@ class VoiceOrchestrator:
             # Notify conversation turn callback
             if self._on_conversation_turn:
                 self._on_conversation_turn(session_id, "user", text)
+                
+            # --- NEW WORKFLOW ---
+            # Pass text to Strands Agent and buffer chunks for better audio quality
+            logger.info(f"Passing text to Strands Agent: {text}")
+            
+            text_buffer = []
+            async for chunk in self.strands_agent.process_message(text):
+                if chunk:
+                    logger.info(f"Strands Agent response chunk: {chunk}")
+                    text_buffer.append(chunk)
+                    
+                    # Buffer text until we have a reasonable amount (sentence or phrase)
+                    # This prevents choppy audio from too-small chunks
+                    buffered_text = "".join(text_buffer)
+                    if len(buffered_text) > 50 or chunk.endswith(('.', '!', '?', '\n')):
+                        # Synthesize speech for the buffered text
+                        audio_data = await self.tts_manager.synthesize(buffered_text)
+                        
+                        if audio_data:
+                            self.audio_io_manager.play_audio(audio_data)
+                            
+                        # Notify conversation turn callback (agent response)
+                        if self._on_conversation_turn:
+                            self._on_conversation_turn(session_id, "agent", buffered_text)
+                        
+                        # Clear buffer
+                        text_buffer = []
+            
+            # Synthesize any remaining buffered text
+            if text_buffer:
+                buffered_text = "".join(text_buffer)
+                audio_data = await self.tts_manager.synthesize(buffered_text)
+                if audio_data:
+                    self.audio_io_manager.play_audio(audio_data)
+                if self._on_conversation_turn:
+                    self._on_conversation_turn(session_id, "agent", buffered_text)
 
         except Exception as e:
             logger.error(f"Error processing text response for {session_id}: {e}")
@@ -386,58 +425,42 @@ class VoiceOrchestrator:
     async def _on_tool_call(self, session_id: str, function_calls: List[Dict[str, Any]]) -> None:
         """Handle tool/function call request from Gemini.
 
-        Gemini is requesting to execute tools (like run_coding_task).
-        We execute them and send the results back.
+        Gemini is requesting to execute tools.
+        In the new workflow, Strands handles tools internally, so this might not be used
+        unless Gemini itself decides to call tools (which we might want to disable or ignore).
         """
         if session_id not in self._active_sessions:
             return
 
         try:
             logger.info(f"Gemini requested {len(function_calls)} tool call(s) for session {session_id}")
-
-            function_responses = []
-
-            for func_call in function_calls:
-                func_name = func_call.get("name")
-                func_id = func_call.get("id")
-                func_args = func_call.get("args", {})
-
-                logger.info(f"Executing tool: {func_name} with args: {func_args}")
-
-                # Execute the tool
-                if func_name == "run_coding_task":
-                    task_description = func_args.get("task_description", "")
-
-                    # Execute Claude Code tool
-                    result = await self.claude_tool.run_coding_task(task_description)
-
-                    # Build function response
-                    function_responses.append({
-                        "id": func_id,
-                        "name": func_name,
-                        "response": {"result": result}
-                    })
-
-                    logger.info(f"Tool {func_name} completed successfully")
-                else:
-                    # Unknown function
-                    logger.warning(f"Unknown function requested: {func_name}")
-                    function_responses.append({
-                        "id": func_id,
-                        "name": func_name,
-                        "response": {"error": f"Unknown function: {func_name}"}
-                    })
-
-            # Send all function responses back to Gemini
-            await self.session_manager.send_tool_response(session_id, function_responses)
-
-            logger.info(f"Sent {len(function_responses)} tool response(s) back to Gemini")
-
+            # We log this but might not need to execute if Strands is driving.
+            # However, if we are using Gemini as the brain (hybrid), we might need this.
+            # For now, assuming Strands is the main brain, we can ignore or log.
+            
         except Exception as e:
             logger.error(f"Error executing tool call for {session_id}: {e}")
             if self._on_error:
                 self._on_error(session_id, e)
                 
+    async def _on_tool_status_update(self, text: str) -> None:
+        """Handle streaming status updates from tools.
+        
+        Synthesizes speech for the status update and plays it back.
+        """
+        try:
+            logger.info(f"Tool status update: {text}")
+            
+            # Synthesize speech
+            audio_data = await self.tts_manager.synthesize(text)
+            
+            if audio_data:
+                # Play audio directly
+                self.audio_io_manager.play_audio(audio_data)
+                
+        except Exception as e:
+            logger.error(f"Error handling tool status update: {e}")
+
     async def _on_voice_error(self, session_id: str, error: Exception) -> None:
         """Handle voice session errors."""
         logger.error(f"Voice session error for {session_id}: {error}")
